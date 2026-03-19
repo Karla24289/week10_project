@@ -154,21 +154,8 @@ def build_model_messages(messages, memory):
     return [{"role": "system", "content": build_system_prompt(memory)}, *messages]
 
 
-def extract_user_memory(user_message, hf_token):
-    prompt = (
-        "Given the user message below, extract any stable personal facts, preferences, "
-        "or traits as a JSON object. Keep only useful memory such as name, preferred "
-        "language, interests, favorite topics, dislikes, goals, or communication "
-        "style. If there is nothing useful to store, return {} only.\n\n"
-        f"User message: {user_message}"
-    )
-
-    response_text = request_chat_completion(
-        [{"role": "user", "content": prompt}],
-        hf_token,
-    )
-
-    cleaned = response_text.strip()
+def parse_json_object(text):
+    cleaned = text.strip()
     if cleaned.startswith("```"):
         lines = cleaned.splitlines()
         if len(lines) >= 3:
@@ -176,10 +163,42 @@ def extract_user_memory(user_message, hf_token):
 
     try:
         data = json.loads(cleaned)
+        return data if isinstance(data, dict) else {}
     except json.JSONDecodeError:
+        pass
+
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start == -1 or end == -1 or end <= start:
         return {}
 
+    try:
+        data = json.loads(cleaned[start : end + 1])
+    except json.JSONDecodeError:
+        return {}
     return data if isinstance(data, dict) else {}
+
+
+def extract_user_memory(user_message, hf_token):
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Extract stable user facts from the user's message. Return only a JSON "
+                "object and no extra text. Prefer simple keys like name, likes, dislikes, "
+                "interests, favorite_food, preferred_language, goals, or communication_style. "
+                "If nothing should be saved, return {}."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"User message: {user_message}",
+        },
+    ]
+
+    response_text = request_chat_completion(messages, hf_token)
+
+    return parse_json_object(response_text)
 
 
 def get_hf_token():
